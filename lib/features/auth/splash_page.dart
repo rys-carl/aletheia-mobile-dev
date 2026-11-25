@@ -19,7 +19,7 @@ class SplashPage extends StatelessWidget {
             AppConfig.appName,
             style: Theme.of(context).textTheme.displaySmall?.copyWith(
                   color: AppColors.onPrimary,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                   letterSpacing: 0.5,
                 ),
           ),

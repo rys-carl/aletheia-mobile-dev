@@ -20,7 +20,7 @@ abstract final class AppConfig {
 
   /// Identifies your app to the OpenStreetMap tile server.
   /// Change this if your Android package name is different.
-  static const mapUserAgent = 'com.example.aletheia_dev';
+  static const mapUserAgent = 'com.rys.aletheia';
 
   /// Identifies your app to OpenStreetMap's search service (Nominatim), which
   /// requires it. Adding a contact email here is recommended by their policy.

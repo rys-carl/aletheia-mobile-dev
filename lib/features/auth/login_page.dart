@@ -149,7 +149,7 @@ class _LoginPageState extends State<LoginPage> {
                     textAlign: TextAlign.center,
                     style: textTheme.headlineMedium?.copyWith(
                       color: AppColors.primary,
-                      fontWeight: FontWeight.w800,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xl),

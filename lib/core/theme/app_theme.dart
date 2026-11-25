@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import 'package:aletheia_dev/core/theme/app_colors.dart';
 import 'package:aletheia_dev/core/theme/app_dimens.dart';
@@ -9,6 +8,11 @@ import 'package:aletheia_dev/core/theme/app_dimens.dart';
 /// `app_dimens.dart`. This is where typography and the look of every
 /// built-in widget (buttons, inputs, dialogs, ...) is defined once.
 abstract final class AppTheme {
+  /// Font family name. Must match the `family:` entry under `fonts:` in
+  /// pubspec.yaml. To change the app's font, swap the files in
+  /// assets/fonts/, update pubspec.yaml, and change this name.
+  static const fontFamily = 'Lato';
+
   static ThemeData light() {
     const scheme = ColorScheme(
       brightness: Brightness.light,
@@ -28,28 +32,16 @@ abstract final class AppTheme {
       outlineVariant: AppColors.border,
     );
 
-    final base = ThemeData(useMaterial3: true, colorScheme: scheme);
-
-    // Typography: change the font for the whole app here.
+    // Typography: passing fontFamily here applies the bundled font to every
+    // text style in the app.
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      fontFamily: fontFamily,
+    );
     final textTheme = base.textTheme.apply(
       bodyColor: AppColors.textPrimary,
       displayColor: AppColors.textPrimary,
-    ).copyWith(
-      displayLarge: GoogleFonts.lato(textStyle: base.textTheme.displayLarge),
-      displayMedium: GoogleFonts.lato(textStyle: base.textTheme.displayMedium),
-      displaySmall: GoogleFonts.lato(textStyle: base.textTheme.displaySmall),
-      headlineLarge: GoogleFonts.lato(textStyle: base.textTheme.headlineLarge),
-      headlineMedium: GoogleFonts.lato(textStyle: base.textTheme.headlineMedium),
-      headlineSmall: GoogleFonts.lato(textStyle: base.textTheme.headlineSmall),
-      titleLarge: GoogleFonts.lato(textStyle: base.textTheme.titleLarge),
-      titleMedium: GoogleFonts.lato(textStyle: base.textTheme.titleMedium),
-      titleSmall: GoogleFonts.lato(textStyle: base.textTheme.titleSmall),
-      bodyLarge: GoogleFonts.lato(textStyle: base.textTheme.bodyLarge),
-      bodyMedium: GoogleFonts.lato(textStyle: base.textTheme.bodyMedium),
-      bodySmall: GoogleFonts.lato(textStyle: base.textTheme.bodySmall),
-      labelLarge: GoogleFonts.lato(textStyle: base.textTheme.labelLarge),
-      labelMedium: GoogleFonts.lato(textStyle: base.textTheme.labelMedium),
-      labelSmall: GoogleFonts.lato(textStyle: base.textTheme.labelSmall),
     );
 
     return base.copyWith(
