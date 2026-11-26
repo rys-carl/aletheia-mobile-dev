@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:aletheia_dev/core/services/supabase_client.dart';
 import 'package:aletheia_dev/core/theme/app_colors.dart';
 import 'package:aletheia_dev/core/theme/app_dimens.dart';
+import 'package:aletheia_dev/features/profile/recently_deleted_page.dart';
 import 'package:aletheia_dev/widgets/confirm_dialog.dart';
 import 'package:aletheia_dev/widgets/primary_button.dart';
 
@@ -58,6 +59,27 @@ class ProfilePage extends StatelessWidget {
               textAlign: TextAlign.center,
               style: textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: AppColors.primary,
+                ),
+                title: const Text('Recently Deleted'),
+                subtitle: const Text('Restore or permanently delete memories'),
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: AppColors.textHint,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const RecentlyDeletedPage(),
+                  ),
+                ),
               ),
             ),
             const Spacer(),

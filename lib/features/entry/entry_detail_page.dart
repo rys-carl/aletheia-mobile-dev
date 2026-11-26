@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
+import 'package:aletheia_dev/core/models/entry_photo.dart';
 import 'package:aletheia_dev/core/models/place_choice.dart';
 import 'package:aletheia_dev/core/services/entry_service.dart';
 import 'package:aletheia_dev/core/theme/app_colors.dart';
@@ -9,12 +11,14 @@ import 'package:aletheia_dev/features/entry/entry_form_page.dart';
 import 'package:aletheia_dev/widgets/app_snack_bar.dart';
 import 'package:aletheia_dev/widgets/confirm_dialog.dart';
 import 'package:aletheia_dev/widgets/network_photo.dart';
+import 'package:aletheia_dev/widgets/photo_manager_sheet.dart';
 import 'package:aletheia_dev/widgets/photo_source_sheet.dart';
 import 'package:aletheia_dev/widgets/photo_viewer.dart';
 import 'package:aletheia_dev/widgets/primary_button.dart';
 import 'package:aletheia_dev/widgets/section_card.dart';
 
-/// Shows one memory: hero photo, photo strip, details, and delete.
+/// Shows one memory: hero photo, photo strip with management & upload
+/// progress/retry, details with date & time, and soft-delete.
 class EntryDetailPage extends StatefulWidget {
   const EntryDetailPage({super.key, required this.entry});
 
@@ -27,17 +31,28 @@ class EntryDetailPage extends StatefulWidget {
 class _EntryDetailPageState extends State<EntryDetailPage> {
   late Map<String, dynamic> _entry;
 
-  List<String> _paths = const [];
-  List<String> _urls = const [];
+  List<EntryPhoto> _photos = const [];
   bool _loading = true;
   bool _busy = false;
   String? _error;
+
+  int _uploadDone = 0;
+  int _uploadTotal = 0;
+  List<XFile> _failedUploads = const [];
 
   String get _id => _entry['id'] as String;
 
   PlaceChoice? get _place {
     final p = _entry['places'];
     return p is Map<String, dynamic> ? PlaceChoice.fromMap(p) : null;
+  }
+
+  EntryPhoto? get _coverPhoto {
+    if (_photos.isEmpty) return null;
+    for (final p in _photos) {
+      if (p.isCover) return p;
+    }
+    return _photos.first;
   }
 
   @override
@@ -57,8 +72,7 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
       final photos = await EntryService.loadPhotos(_id);
       if (!mounted) return;
       setState(() {
-        _paths = photos.paths;
-        _urls = photos.urls;
+        _photos = photos;
         _loading = false;
         _error = null;
       });
@@ -74,7 +88,7 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
   Future<void> _edit() async {
     final updated = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute<Map<String, dynamic>>(
-        builder: (_) => EntryFormPage(entry: _entry, existingUrls: _urls),
+        builder: (_) => EntryFormPage(entry: _entry, existingPhotos: _photos),
       ),
     );
     if (updated == null || !mounted) return;
@@ -82,21 +96,31 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
     await _loadPhotos();
   }
 
+  Future<void> _managePhotos() async {
+    final updated = await showPhotoManagerSheet(
+      context,
+      entryId: _id,
+      photos: _photos,
+    );
+    if (!mounted) return;
+    setState(() => _photos = updated);
+  }
+
   Future<void> _delete() async {
     final confirmed = await showConfirmDialog(
       context,
       title: 'Delete Memory?',
       message:
-          "Are you sure you want to delete this memory? Its photos will be deleted too. This can't be undone.",
+          'This memory will be moved to Recently Deleted. You can undo or restore it later.',
       confirmLabel: 'Delete Memory',
     );
     if (!confirmed || !mounted) return;
 
     setState(() => _busy = true);
     try {
-      await EntryService.delete(_id, _paths);
+      await EntryService.softDelete(_id);
       if (!mounted) return;
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(_id);
     } catch (e) {
       if (mounted) setState(() => _busy = false);
       _showError('Could not delete: $e');
@@ -106,22 +130,62 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
   Future<void> _addPhotos() async {
     final picked = await pickPhotos(context);
     if (picked.isEmpty || !mounted) return;
+    await _uploadFiles(picked);
+  }
 
-    setState(() => _busy = true);
+  Future<void> _uploadFiles(List<XFile> files) async {
+    setState(() {
+      _busy = true;
+      _uploadDone = 0;
+      _uploadTotal = files.length;
+      _failedUploads = const [];
+    });
+
     try {
-      await EntryService.addPhotos(_id, picked);
+      final result = await EntryService.addPhotos(
+        _id,
+        files,
+        startSortOrder: _photos.length,
+        onUploadProgress: (done, total) {
+          if (!mounted) return;
+          setState(() {
+            _uploadDone = done;
+            _uploadTotal = total;
+          });
+        },
+      );
       await _loadPhotos();
+      if (!mounted) return;
+      if (result.hasFailures) {
+        setState(() => _failedUploads = result.failedFiles);
+        showAppSnackBar(
+          context,
+          '${result.failedFiles.length} photo(s) failed to upload.',
+          actionLabel: 'Retry',
+          onAction: () => _uploadFiles(_failedUploads),
+        );
+      }
     } catch (e) {
+      if (mounted) setState(() => _failedUploads = files);
       _showError('Could not upload photos: $e');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _uploadTotal = 0;
+        });
+      }
     }
   }
 
   void _openViewer(int index) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PhotoViewer(urls: _urls, initialIndex: index),
+        builder: (_) => PhotoViewer(
+          urls: [for (final p in _photos) p.url],
+          storagePaths: [for (final p in _photos) p.storagePath],
+          initialIndex: index,
+        ),
       ),
     );
   }
@@ -141,7 +205,28 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
       ),
       body: Column(
         children: [
-          if (_busy) const LinearProgressIndicator(),
+          if (_busy)
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                LinearProgressIndicator(
+                  value: _uploadTotal > 0 ? _uploadDone / _uploadTotal : null,
+                ),
+                if (_uploadTotal > 0)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg,
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: Text(
+                      'Uploading photo $_uploadDone of $_uploadTotal...',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                    ),
+                  ),
+              ],
+            ),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -152,6 +237,13 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
               ),
               children: [
                 _buildHero(),
+                if (_failedUploads.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _FailedUploadBanner(
+                    count: _failedUploads.length,
+                    onRetry: _busy ? null : () => _uploadFiles(_failedUploads),
+                  ),
+                ],
                 const SizedBox(height: AppSpacing.lg),
                 _buildPhotosCard(),
                 const SizedBox(height: AppSpacing.lg),
@@ -171,11 +263,13 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
   }
 
   Widget _buildHero() {
+    final cover = _coverPhoto;
+    final coverIndex = cover == null ? 0 : _photos.indexOf(cover);
     return AspectRatio(
       aspectRatio: 16 / 10,
       child: ClipRRect(
         borderRadius: AppRadius.lgAll,
-        child: _urls.isEmpty
+        child: cover == null
             ? ColoredBox(
                 color: AppColors.primarySoft,
                 child: Center(
@@ -189,8 +283,12 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
                 ),
               )
             : GestureDetector(
-                onTap: () => _openViewer(0),
-                child: NetworkPhoto(url: _urls.first, cacheWidth: 1000),
+                onTap: () => _openViewer(coverIndex < 0 ? 0 : coverIndex),
+                child: NetworkPhoto(
+                  url: cover.url,
+                  storagePath: cover.storagePath,
+                  cacheWidth: 1000,
+                ),
               ),
       ),
     );
@@ -207,7 +305,7 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
       );
     } else if (_error != null) {
       content = Text('Could not load photos:\n$_error');
-    } else if (_urls.isEmpty) {
+    } else if (_photos.isEmpty) {
       content = Text(
         'No photos yet.',
         style: textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
@@ -217,19 +315,45 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
         height: 88,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          itemCount: _urls.length,
+          itemCount: _photos.length,
           separatorBuilder: (context, index) =>
               const SizedBox(width: AppSpacing.sm),
-          itemBuilder: (context, index) => GestureDetector(
-            onTap: () => _openViewer(index),
-            child: SizedBox(
-              width: 88,
-              child: ClipRRect(
-                borderRadius: AppRadius.mdAll,
-                child: NetworkPhoto(url: _urls[index], cacheWidth: 300),
+          itemBuilder: (context, index) {
+            final photo = _photos[index];
+            return GestureDetector(
+              onTap: () => _openViewer(index),
+              child: SizedBox(
+                width: 88,
+                child: ClipRRect(
+                  borderRadius: AppRadius.mdAll,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      NetworkPhoto(
+                        url: photo.url,
+                        storagePath: photo.storagePath,
+                        cacheWidth: 300,
+                      ),
+                      if (photo.isCover)
+                        const Positioned(
+                          left: 4,
+                          bottom: 4,
+                          child: CircleAvatar(
+                            radius: 10,
+                            backgroundColor: Colors.black54,
+                            child: Icon(
+                              Icons.star,
+                              size: 12,
+                              color: Colors.amber,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       );
     }
@@ -249,6 +373,12 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
                   ),
                 ),
               ),
+              if (_photos.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _busy ? null : _managePhotos,
+                  icon: const Icon(Icons.tune, size: 18),
+                  label: const Text('Manage'),
+                ),
               TextButton.icon(
                 onPressed: _busy ? null : _addPhotos,
                 icon: const Icon(Icons.add_a_photo_outlined, size: 18),
@@ -284,12 +414,52 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
             Text(note, style: textTheme.bodyMedium),
           ],
           const SizedBox(height: AppSpacing.lg),
-          _InfoRow(label: 'Date:', value: displayDateOf(_entry['happened_at'])),
+          _InfoRow(
+            label: 'Date & Time:',
+            value: displayDateTimeOf(_entry['happened_at']),
+          ),
           if (place != null) ...[
             const SizedBox(height: AppSpacing.sm),
             _InfoRow(label: 'Location:', value: place.name),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _FailedUploadBanner extends StatelessWidget {
+  const _FailedUploadBanner({required this.count, required this.onRetry});
+
+  final int count;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.danger.withValues(alpha: 0.08),
+      borderRadius: AppRadius.mdAll,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                '$count photo${count == 1 ? '' : 's'} failed to upload.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppColors.danger,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
       ),
     );
   }
@@ -308,7 +478,7 @@ class _InfoRow extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 84,
+          width: 96,
           child: Text(
             label,
             style: textTheme.bodyMedium?.copyWith(

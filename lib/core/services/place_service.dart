@@ -17,12 +17,16 @@ abstract final class PlaceService {
   static Future<List<Map<String, dynamic>>> fetchWithEntries() async {
     final data = await supabase
         .from('places')
-        .select('id, name, lat, lng, entries(id, title, note, happened_at)')
+        .select('id, name, lat, lng, entries(id, title, note, happened_at, deleted_at)')
         .order('name');
 
     final merged = <Map<String, dynamic>>[];
     for (final p in data) {
-      final entries = (p['entries'] as List?) ?? const [];
+      final rawEntries = (p['entries'] as List?) ?? const [];
+      final entries = [
+        for (final e in rawEntries)
+          if (e is Map && e['deleted_at'] == null) e,
+      ];
       if (entries.isEmpty) continue;
 
       final choice = PlaceChoice.fromMap(p);

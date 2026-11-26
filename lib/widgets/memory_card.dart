@@ -17,6 +17,7 @@ class MemoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final thumb = entry['thumb_url'] as String?;
+    final thumbPath = entry['thumb_path'] as String?;
     final count = (entry['photo_count'] as int?) ?? 0;
     final place = entry['places'] as Map<String, dynamic>?;
     final date = displayDateOf(entry['happened_at']);
@@ -46,7 +47,12 @@ class MemoryCard extends StatelessWidget {
                         borderRadius: AppRadius.mdAll,
                         child: thumb == null
                             ? const _NoPhoto()
-                            : NetworkPhoto(url: thumb, cacheWidth: 400),
+                            : NetworkPhoto(
+                                url: thumb,
+                                storagePath: thumbPath,
+                                thumbnail: true,
+                                cacheWidth: 400,
+                              ),
                       ),
                       if (count > 1)
                         Positioned(

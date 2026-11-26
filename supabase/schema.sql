@@ -13,15 +13,17 @@ create table places (
 );
 
 create table entries (
-  id           uuid primary key default gen_random_uuid(),
-  user_id      uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  type         text not null check (type in ('moment', 'place', 'game', 'anime', 'manga')),
-  title        text not null,
-  note         text,
-  happened_at  date not null default current_date,
-  place_id     uuid references places(id) on delete set null,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  type            text not null check (type in ('moment', 'place', 'game', 'anime', 'manga')),
+  title           text not null,
+  note            text,
+  happened_at     timestamptz not null default now(),
+  place_id        uuid references places(id) on delete set null,
+  cover_media_id  uuid,
+  deleted_at      timestamptz,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
 );
 
 create table media (
@@ -29,9 +31,15 @@ create table media (
   user_id       uuid not null default auth.uid() references auth.users(id) on delete cascade,
   entry_id      uuid not null references entries(id) on delete cascade,
   storage_path  text not null,
+  sort_order    int not null default 0,
+  is_cover      boolean not null default false,
   taken_at      timestamptz,
   caption       text
 );
+
+alter table entries
+  add constraint entries_cover_media_fk
+  foreign key (cover_media_id) references media(id) on delete set null;
 
 create table tags (
   id       uuid primary key default gen_random_uuid(),
@@ -59,8 +67,9 @@ create table progress (
 );
 
 -- Helpful indexes
-create index entries_user_date_idx on entries (user_id, happened_at desc);
-create index media_entry_idx on media (entry_id);
+create index entries_user_date_idx on entries (user_id, happened_at desc) where deleted_at is null;
+create index entries_user_deleted_idx on entries (user_id, deleted_at) where deleted_at is not null;
+create index media_entry_order_idx on media (entry_id, sort_order, storage_path);
 
 -- ============ ROW LEVEL SECURITY ============
 -- Only the logged-in owner can see or change their own rows.

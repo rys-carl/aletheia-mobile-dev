@@ -3,24 +3,27 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:aletheia_dev/core/models/entry_photo.dart';
 import 'package:aletheia_dev/core/theme/app_colors.dart';
 import 'package:aletheia_dev/core/theme/app_dimens.dart';
 import 'package:aletheia_dev/widgets/network_photo.dart';
 
 /// Horizontal strip used in the memory form: an "Add Photos" tile, then the
-/// photos already saved ([existingUrls], read-only), then photos picked but
-/// not saved yet ([pending], each with a remove button).
+/// photos already saved ([existingPhotos], tappable via [onManageExisting]),
+/// then photos picked but not saved yet ([pending], each with a remove button).
 class PhotoStrip extends StatelessWidget {
   const PhotoStrip({
     super.key,
     required this.onAdd,
-    this.existingUrls = const [],
+    this.existingPhotos = const [],
+    this.onManageExisting,
     this.pending = const [],
     this.onRemovePending,
   });
 
   final VoidCallback onAdd;
-  final List<String> existingUrls;
+  final List<EntryPhoto> existingPhotos;
+  final VoidCallback? onManageExisting;
   final List<XFile> pending;
   final void Function(int index)? onRemovePending;
 
@@ -34,8 +37,16 @@ class PhotoStrip extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         children: [
           _AddTile(onTap: onAdd),
-          for (final url in existingUrls)
-            _Thumb(child: NetworkPhoto(url: url, cacheWidth: 300)),
+          for (final photo in existingPhotos)
+            _Thumb(
+              isCover: photo.isCover,
+              onTap: onManageExisting,
+              child: NetworkPhoto(
+                url: photo.url,
+                storagePath: photo.storagePath,
+                cacheWidth: 300,
+              ),
+            ),
           for (var i = 0; i < pending.length; i++)
             _Thumb(
               onRemove: onRemovePending == null
@@ -106,10 +117,17 @@ class _AddTile extends StatelessWidget {
 }
 
 class _Thumb extends StatelessWidget {
-  const _Thumb({required this.child, this.onRemove});
+  const _Thumb({
+    required this.child,
+    this.onRemove,
+    this.onTap,
+    this.isCover = false,
+  });
 
   final Widget child;
   final VoidCallback? onRemove;
+  final VoidCallback? onTap;
+  final bool isCover;
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +141,37 @@ class _Thumb extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              child,
+              GestureDetector(onTap: onTap, child: child),
+              if (isCover)
+                Positioned(
+                  left: 4,
+                  bottom: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.all(Radius.circular(10)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.star, size: 11, color: Colors.amber),
+                        SizedBox(width: 2),
+                        Text(
+                          'Cover',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (onRemove != null)
                 Positioned(
                   top: 4,
