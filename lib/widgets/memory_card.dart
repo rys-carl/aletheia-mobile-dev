@@ -19,6 +19,7 @@ class MemoryCard extends StatelessWidget {
     final thumb = entry['thumb_url'] as String?;
     final thumbPath = entry['thumb_path'] as String?;
     final count = (entry['photo_count'] as int?) ?? 0;
+    final feeling = entry['feeling'] as String?;
     final place = entry['places'] as Map<String, dynamic>?;
     final date = displayDateOf(entry['happened_at']);
     final subtitle = place == null ? date : '$date · ${place['name']}';
@@ -54,6 +55,27 @@ class MemoryCard extends StatelessWidget {
                                 cacheWidth: 400,
                               ),
                       ),
+                      if (feeling != null && feeling.isNotEmpty)
+                        Positioned(
+                          top: AppSpacing.sm,
+                          left: AppSpacing.sm,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(20),
+                              ),
+                            ),
+                            child: Text(
+                              feeling,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
                       if (count > 1)
                         Positioned(
                           top: AppSpacing.sm,

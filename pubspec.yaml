@@ -41,6 +41,10 @@ dependencies:
   geolocator: ^14.1.2
   http: ^1.6.0
   cached_network_image: ^4.0.7
+  table_calendar: ^3.3.0
+  flutter_local_notifications: ^23.0.4
+  timezone: ^0.11.2
+  photo_manager: ^3.12.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'package:aletheia_dev/core/services/photo_service.dart';
 import 'package:aletheia_dev/core/theme/app_colors.dart';
+import 'package:aletheia_dev/widgets/skeleton.dart';
 
 /// A disk-cached network image with fade-in, optional thumbnail cache key, and
 /// automatic signed-URL refresh when a 1-hour link expires.
@@ -90,15 +91,10 @@ class _NetworkPhotoState extends State<NetworkPhoto> {
   @override
   Widget build(BuildContext context) {
     if (_refreshing) {
-      return const ColoredBox(
-        color: AppColors.surfaceMuted,
-        child: Center(
-          child: SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ),
+      return const SkeletonBox(
+        width: double.infinity,
+        height: double.infinity,
+        borderRadius: BorderRadius.zero,
       );
     }
 

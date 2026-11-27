@@ -13,9 +13,12 @@ import 'package:aletheia_dev/core/utils/date_format.dart';
 import 'package:aletheia_dev/core/utils/entry_grouping.dart';
 import 'package:aletheia_dev/features/entry/entry_detail_page.dart';
 import 'package:aletheia_dev/features/profile/profile_page.dart';
+import 'package:aletheia_dev/features/upcoming/moment_ended_prompt_page.dart';
+import 'package:aletheia_dev/features/upcoming/upcoming_moment_form_page.dart';
 import 'package:aletheia_dev/widgets/app_snack_bar.dart';
 import 'package:aletheia_dev/widgets/empty_state.dart';
 import 'package:aletheia_dev/widgets/memory_card.dart';
+import 'package:aletheia_dev/widgets/skeleton.dart';
 
 /// Home tab: greeting, search & filters, month-grouped two-column grid of
 /// memories with pagination, newest first.
@@ -30,8 +33,10 @@ class _HomePageState extends State<HomePage> {
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
   Timer? _debounce;
+  Timer? _upcomingTimer;
 
   List<Map<String, dynamic>>? _entries;
+  List<Map<String, dynamic>> _upcoming = const [];
   Object? _error;
   bool _loading = true;
   bool _loadingMore = false;
@@ -59,6 +64,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _upcomingTimer?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     entriesRevision.removeListener(_onEntriesChanged);
@@ -67,6 +73,30 @@ class _HomePageState extends State<HomePage> {
 
   void _onEntriesChanged() {
     _loadFirstPage();
+  }
+
+  /// Schedules a one-shot rebuild right when the next upcoming moment starts
+  /// or ends so the status badge updates without a manual refresh.
+  void _scheduleNextUpcomingTick() {
+    _upcomingTimer?.cancel();
+    final now = DateTime.now();
+    DateTime? nextTransition;
+    for (final item in _upcoming) {
+      for (final raw in [item['happened_at'], item['ends_at']]) {
+        final dt = tryParseEntryDate(raw);
+        if (dt == null || !dt.isAfter(now)) continue;
+        if (nextTransition == null || dt.isBefore(nextTransition)) {
+          nextTransition = dt;
+        }
+      }
+    }
+    if (nextTransition == null) return;
+    final delay = nextTransition.difference(now) + const Duration(seconds: 1);
+    _upcomingTimer = Timer(delay, () {
+      if (!mounted) return;
+      setState(() {});
+      _scheduleNextUpcomingTick();
+    });
   }
 
   void _onScroll() {
@@ -81,22 +111,29 @@ class _HomePageState extends State<HomePage> {
   Future<void> _loadFirstPage() async {
     final seq = ++_requestSeq;
     try {
-      final data = await EntryService.fetchPage(
-        page: 0,
-        query: _query,
-        startDate: _dateRange?.start,
-        endDate: _dateRange?.end,
-        placeId: _selectedPlace?.id,
-      );
+      final results = await Future.wait([
+        EntryService.fetchPage(
+          page: 0,
+          query: _query,
+          startDate: _dateRange?.start,
+          endDate: _dateRange?.end,
+          placeId: _selectedPlace?.id,
+        ),
+        EntryService.fetchUpcoming(),
+      ]);
+      final data = results[0];
+      final upcoming = results[1];
       if (!mounted || seq != _requestSeq) return;
       setState(() {
         _entries = data;
+        _upcoming = upcoming;
         _page = 0;
         _hasMore = data.length >= EntryService.defaultPageSize;
         _error = null;
         _loading = false;
         _loadingMore = false;
       });
+      _scheduleNextUpcomingTick();
     } catch (e) {
       if (!mounted || seq != _requestSeq) return;
       final hadData = _entries != null;
@@ -294,6 +331,27 @@ class _HomePageState extends State<HomePage> {
               },
               onClearAll: _clearFilters,
             ),
+            if (!_hasActiveFilters && _upcoming.isNotEmpty)
+              _UpcomingSection(
+                upcoming: _upcoming,
+                onPlanNew: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const UpcomingMomentFormPage(),
+                  ),
+                ),
+                onTapItem: (item) {
+                  final endsAt = tryParseEntryDate(item['ends_at']);
+                  final hasEnded =
+                      endsAt != null && !endsAt.isAfter(DateTime.now());
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => hasEnded
+                          ? MomentEndedPromptPage(entry: item)
+                          : EntryDetailPage(entry: item),
+                    ),
+                  );
+                },
+              ),
             Expanded(child: _buildBody()),
           ],
         ),
@@ -303,7 +361,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildBody() {
     if (_loading && _entries == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonMemoryGrid();
     }
     if (_error != null && _entries == null) {
       return EmptyState(
@@ -421,6 +479,166 @@ class _HomePageState extends State<HomePage> {
             const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl)),
         ],
       ),
+    );
+  }
+}
+
+class _UpcomingSection extends StatelessWidget {
+  const _UpcomingSection({
+    required this.upcoming,
+    required this.onPlanNew,
+    required this.onTapItem,
+  });
+
+  final List<Map<String, dynamic>> upcoming;
+  final VoidCallback onPlanNew;
+  final ValueChanged<Map<String, dynamic>> onTapItem;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    final now = DateTime.now();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.xs,
+            AppSpacing.sm,
+            AppSpacing.xs,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Upcoming Moments',
+                  style: textTheme.titleSmall?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onPlanNew,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Plan'),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 108,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            itemCount: upcoming.length,
+            separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.sm),
+            itemBuilder: (context, index) {
+              final item = upcoming[index];
+              final startsAt = tryParseEntryDate(item['happened_at']);
+              final endsAt = tryParseEntryDate(item['ends_at']);
+              final hasEnded = endsAt != null && !endsAt.isAfter(now);
+              final hasStarted =
+                  !hasEnded && startsAt != null && !startsAt.isAfter(now);
+
+              final String statusLabel;
+              final IconData statusIcon;
+              if (hasEnded) {
+                statusLabel = 'Ended · Add photos';
+                statusIcon = Icons.add_a_photo_outlined;
+              } else if (hasStarted) {
+                statusLabel = 'Happening now';
+                statusIcon = Icons.play_circle_outline;
+              } else {
+                statusLabel = 'Starts ${displayDateTimeOf(item['happened_at'])}';
+                statusIcon = Icons.event_outlined;
+              }
+
+              final String bottomLine;
+              if (hasEnded) {
+                bottomLine = 'Ended ${displayDateTimeOf(item['ends_at'])}';
+              } else if (endsAt != null) {
+                bottomLine = 'Ends ${displayDateTimeOf(item['ends_at'])}';
+              } else {
+                bottomLine = 'Tap to view details';
+              }
+
+              return SizedBox(
+                width: 224,
+                child: Material(
+                  color: hasEnded
+                      ? AppColors.primarySoft
+                      : hasStarted
+                          ? AppColors.primarySoft.withValues(alpha: 0.45)
+                          : AppColors.surface,
+                  borderRadius: AppRadius.mdAll,
+                  child: InkWell(
+                    borderRadius: AppRadius.mdAll,
+                    onTap: () => onTapItem(item),
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        borderRadius: AppRadius.mdAll,
+                        border: Border.all(
+                          color: (hasEnded || hasStarted)
+                              ? AppColors.primary
+                              : AppColors.border,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                statusIcon,
+                                size: 16,
+                                color: AppColors.primary,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  statusLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: textTheme.labelSmall?.copyWith(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            item['title'] as String,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            bottomLine,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+      ],
     );
   }
 }

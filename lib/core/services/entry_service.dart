@@ -2,6 +2,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:aletheia_dev/core/models/entry_photo.dart';
 import 'package:aletheia_dev/core/models/place_choice.dart';
+import 'package:aletheia_dev/core/services/notification_service.dart';
 import 'package:aletheia_dev/core/services/photo_service.dart';
 import 'package:aletheia_dev/core/services/place_service.dart';
 import 'package:aletheia_dev/core/services/supabase_client.dart';
@@ -14,8 +15,12 @@ import 'package:aletheia_dev/core/utils/date_format.dart';
 abstract final class EntryService {
   static const int defaultPageSize = 20;
 
+  static const _entrySelect =
+      '*, media!media_entry_id_fkey(id, storage_path, sort_order, is_cover), places(id, name, lat, lng), albums(id, title, description)';
+
   /// Loads a page of active (non-deleted) entries, newest first, with optional
-  /// text search ([query]), [startDate]/[endDate] range, and [placeId] filter.
+  /// text search ([query]), [startDate]/[endDate] range, [placeId], and
+  /// [albumId] filter.
   static Future<List<Map<String, dynamic>>> fetchPage({
     int page = 0,
     int pageSize = defaultPageSize,
@@ -23,13 +28,13 @@ abstract final class EntryService {
     DateTime? startDate,
     DateTime? endDate,
     String? placeId,
+    String? albumId,
   }) async {
     var filter = supabase
         .from('entries')
-        .select(
-          '*, media!media_entry_id_fkey(id, storage_path, sort_order, is_cover), places(id, name, lat, lng)',
-        )
-        .isFilter('deleted_at', null);
+        .select(_entrySelect)
+        .isFilter('deleted_at', null)
+        .neq('type', 'upcoming');
 
     final trimmed = query?.trim() ?? '';
     if (trimmed.isNotEmpty) {
@@ -38,6 +43,9 @@ abstract final class EntryService {
     }
     if (placeId != null && placeId.isNotEmpty) {
       filter = filter.eq('place_id', placeId);
+    }
+    if (albumId != null && albumId.isNotEmpty) {
+      filter = filter.eq('album_id', albumId);
     }
     if (startDate != null) {
       final start = DateTime(startDate.year, startDate.month, startDate.day);
@@ -59,13 +67,109 @@ abstract final class EntryService {
     return _attachThumbnails(List<Map<String, dynamic>>.from(data));
   }
 
+  /// Loads all active entries between [start] (inclusive) and [end]
+  /// (exclusive), ordered newest first. Used by the Calendar tab.
+  static Future<List<Map<String, dynamic>>> fetchDateRange(
+    DateTime start,
+    DateTime end,
+  ) async {
+    final data = await supabase
+        .from('entries')
+        .select(_entrySelect)
+        .isFilter('deleted_at', null)
+        .gte('happened_at', isoTimestamp(start))
+        .lt('happened_at', isoTimestamp(end))
+        .order('happened_at', ascending: false);
+
+    return _attachThumbnails(List<Map<String, dynamic>>.from(data));
+  }
+
+  /// Loads active upcoming moments (`type = 'upcoming'`), soonest first.
+  static Future<List<Map<String, dynamic>>> fetchUpcoming() async {
+    final data = await supabase
+        .from('entries')
+        .select(_entrySelect)
+        .isFilter('deleted_at', null)
+        .eq('type', 'upcoming')
+        .order('happened_at', ascending: true);
+
+    return List<Map<String, dynamic>>.from(data);
+  }
+
+  /// Loads a single active entry by [id].
+  static Future<Map<String, dynamic>?> fetchById(String id) async {
+    final data = await supabase
+        .from('entries')
+        .select(_entrySelect)
+        .eq('id', id)
+        .isFilter('deleted_at', null)
+        .maybeSingle();
+    if (data == null) return null;
+    final list = await _attachThumbnails([Map<String, dynamic>.from(data)]);
+    return list.first;
+  }
+
+  /// Creates an upcoming moment (`type: 'upcoming'`).
+  static Future<String> createUpcoming({
+    required String title,
+    String? note,
+    required DateTime startsAt,
+    required DateTime endsAt,
+    PlaceChoice? place,
+    String? albumId,
+  }) async {
+    try {
+      final placeId = await PlaceService.resolveId(place);
+      final inserted = await supabase
+          .from('entries')
+          .insert({
+            'type': 'upcoming',
+            'title': title,
+            'note': note,
+            'happened_at': isoTimestamp(startsAt),
+            'ends_at': isoTimestamp(endsAt),
+            'place_id': placeId,
+            'album_id': albumId,
+          })
+          .select('id')
+          .single();
+      return inserted['id'] as String;
+    } finally {
+      notifyEntriesChanged();
+    }
+  }
+
+  /// Converts an upcoming moment into a regular memory (`type: 'moment'`) and
+  /// uploads any selected photos.
+  static Future<UploadBatchResult> completeUpcoming({
+    required String entryId,
+    List<XFile> photos = const [],
+    void Function(int completed, int total)? onUploadProgress,
+  }) async {
+    try {
+      final uploadResult = await PhotoService.uploadWithProgress(
+        entryId,
+        photos,
+        onProgress: onUploadProgress,
+      );
+      await supabase
+          .from('entries')
+          .update({
+            'type': 'moment',
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', entryId);
+      return uploadResult;
+    } finally {
+      notifyEntriesChanged();
+    }
+  }
+
   /// Loads soft-deleted entries, most recently deleted first.
   static Future<List<Map<String, dynamic>>> fetchDeleted() async {
     final data = await supabase
         .from('entries')
-        .select(
-          '*, media!media_entry_id_fkey(id, storage_path, sort_order, is_cover), places(id, name, lat, lng)',
-        )
+        .select(_entrySelect)
         .not('deleted_at', 'is', null)
         .order('deleted_at', ascending: false);
 
@@ -166,8 +270,10 @@ abstract final class EntryService {
   static Future<({String id, UploadBatchResult uploadResult})> create({
     required String title,
     String? note,
+    String? feeling,
     required DateTime date,
     PlaceChoice? place,
+    String? albumId,
     List<XFile> photos = const [],
     void Function(int completed, int total)? onUploadProgress,
   }) async {
@@ -180,8 +286,10 @@ abstract final class EntryService {
             'type': 'moment',
             'title': title,
             'note': note,
+            'feeling': feeling,
             'happened_at': isoTimestamp(date),
             'place_id': placeId,
+            'album_id': albumId,
           })
           .select('id')
           .single();
@@ -205,9 +313,12 @@ abstract final class EntryService {
     required String id,
     required String title,
     String? note,
+    String? feeling,
     required DateTime date,
     PlaceChoice? place,
     required bool placeTouched,
+    String? albumId,
+    bool albumTouched = false,
     List<XFile> newPhotos = const [],
     int startSortOrder = 0,
     void Function(int completed, int total)? onUploadProgress,
@@ -216,17 +327,21 @@ abstract final class EntryService {
       final changes = <String, dynamic>{
         'title': title,
         'note': note,
+        'feeling': feeling,
         'happened_at': isoTimestamp(date),
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
       if (placeTouched) {
         changes['place_id'] = await PlaceService.resolveId(place);
       }
+      if (albumTouched) {
+        changes['album_id'] = albumId;
+      }
       final updated = await supabase
           .from('entries')
           .update(changes)
           .eq('id', id)
-          .select('*, places(id, name, lat, lng)')
+          .select('*, places(id, name, lat, lng), albums(id, title, description)')
           .single();
 
       final uploadResult = await PhotoService.uploadWithProgress(
@@ -334,6 +449,7 @@ abstract final class EntryService {
   /// the deletion can be undone or restored from Recently Deleted.
   static Future<void> softDelete(String id) async {
     try {
+      await NotificationService.cancelMoment(id);
       await supabase
           .from('entries')
           .update({'deleted_at': isoTimestamp(DateTime.now())})
@@ -361,6 +477,7 @@ abstract final class EntryService {
     List<String> photoPaths,
   ) async {
     try {
+      await NotificationService.cancelMoment(id);
       await PhotoService.removeFromStorage(photoPaths);
       await supabase.from('entries').delete().eq('id', id);
     } finally {

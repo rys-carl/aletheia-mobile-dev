@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:aletheia_dev/core/models/album_choice.dart';
 import 'package:aletheia_dev/core/models/entry_photo.dart';
 import 'package:aletheia_dev/core/models/place_choice.dart';
+import 'package:aletheia_dev/core/services/album_service.dart';
 import 'package:aletheia_dev/core/services/entry_service.dart';
 import 'package:aletheia_dev/core/theme/app_colors.dart';
 import 'package:aletheia_dev/core/theme/app_dimens.dart';
 import 'package:aletheia_dev/core/utils/date_format.dart';
+import 'package:aletheia_dev/features/albums/album_form_sheet.dart';
 import 'package:aletheia_dev/features/map/location_picker_page.dart';
 import 'package:aletheia_dev/widgets/app_snack_bar.dart';
+import 'package:aletheia_dev/widgets/feeling_picker.dart';
 import 'package:aletheia_dev/widgets/form_section.dart';
 import 'package:aletheia_dev/widgets/photo_manager_sheet.dart';
 import 'package:aletheia_dev/widgets/photo_source_sheet.dart';
@@ -28,10 +32,12 @@ class EntryFormPage extends StatefulWidget {
     super.key,
     this.entry,
     this.existingPhotos = const [],
+    this.initialAlbum,
   });
 
   final Map<String, dynamic>? entry;
   final List<EntryPhoto> existingPhotos;
+  final AlbumChoice? initialAlbum;
 
   bool get isEdit => entry != null;
 
@@ -44,8 +50,11 @@ class _EntryFormPageState extends State<EntryFormPage> {
   final _note = TextEditingController();
 
   DateTime _date = DateTime.now();
+  String? _feeling;
   PlaceChoice? _place;
   bool _placeTouched = false;
+  AlbumChoice? _album;
+  bool _albumTouched = false;
   late List<EntryPhoto> _existingPhotos;
   List<XFile> _photos = [];
   String? _createdEntryId;
@@ -59,13 +68,17 @@ class _EntryFormPageState extends State<EntryFormPage> {
   void initState() {
     super.initState();
     _existingPhotos = List<EntryPhoto>.from(widget.existingPhotos);
+    _album = widget.initialAlbum;
     final entry = widget.entry;
     if (entry != null) {
       _title.text = entry['title'] as String;
       _note.text = (entry['note'] as String?) ?? '';
+      _feeling = entry['feeling'] as String?;
       _date = tryParseEntryDate(entry['happened_at']) ?? DateTime.now();
       final p = entry['places'];
       if (p is Map<String, dynamic>) _place = PlaceChoice.fromMap(p);
+      final a = entry['albums'];
+      if (a is Map<String, dynamic>) _album = AlbumChoice.fromMap(a);
     }
   }
 
@@ -125,6 +138,111 @@ class _EntryFormPageState extends State<EntryFormPage> {
     });
   }
 
+  Future<void> _pickAlbum() async {
+    final picked = await showModalBottomSheet<AlbumChoice>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (sheetCtx) => FutureBuilder<List<AlbumChoice>>(
+        future: AlbumService.fetchChoices(),
+        builder: (context, snapshot) {
+          final albums = snapshot.data;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg,
+                      vertical: AppSpacing.sm,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Choose Album',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('New Album'),
+                          onPressed: () async {
+                            final created = await showAlbumFormSheet(context);
+                            if (created != null && sheetCtx.mounted) {
+                              Navigator.of(sheetCtx).pop(created);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const Padding(
+                      padding: EdgeInsets.all(AppSpacing.xl),
+                      child: Center(child: LinearProgressIndicator()),
+                    )
+                  else if (albums == null || albums.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(AppSpacing.xl),
+                      child: Text(
+                        'No albums yet. Tap "New Album" to create one.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                      ),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: albums.length,
+                        itemBuilder: (_, i) {
+                          final a = albums[i];
+                          final selected = _album?.id == a.id;
+                          return ListTile(
+                            leading: Icon(
+                              selected
+                                  ? Icons.photo_album
+                                  : Icons.photo_album_outlined,
+                              color: AppColors.primary,
+                            ),
+                            title: Text(a.title),
+                            trailing: selected
+                                ? const Icon(Icons.check,
+                                    color: AppColors.primary)
+                                : null,
+                            onTap: () => Navigator.of(sheetCtx).pop(a),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _album = picked;
+      _albumTouched = true;
+    });
+  }
+
   Future<void> _addPhotos() async {
     final picked = await pickPhotos(context);
     if (picked.isEmpty || !mounted) return;
@@ -163,9 +281,12 @@ class _EntryFormPageState extends State<EntryFormPage> {
           id: widget.entry!['id'] as String,
           title: title,
           note: note.isEmpty ? null : note,
+          feeling: _feeling,
           date: _date,
           place: _place,
           placeTouched: _placeTouched,
+          albumId: _album?.id,
+          albumTouched: _albumTouched,
           newPhotos: _photos,
           startSortOrder: _existingPhotos.length,
           onUploadProgress: _onUploadProgress,
@@ -214,8 +335,10 @@ class _EntryFormPageState extends State<EntryFormPage> {
         final res = await EntryService.create(
           title: title,
           note: note.isEmpty ? null : note,
+          feeling: _feeling,
           date: _date,
           place: _place,
+          albumId: _album?.id,
           photos: _photos,
           onUploadProgress: _onUploadProgress,
         );
@@ -307,6 +430,14 @@ class _EntryFormPageState extends State<EntryFormPage> {
             ),
             _gap,
             FormSection(
+              label: 'Feeling',
+              child: FeelingPicker(
+                value: _feeling,
+                onChanged: (v) => setState(() => _feeling = v),
+              ),
+            ),
+            _gap,
+            FormSection(
               label: 'Date & Time',
               child: Row(
                 children: [
@@ -343,6 +474,22 @@ class _EntryFormPageState extends State<EntryFormPage> {
                     : () => setState(() {
                           _place = null;
                           _placeTouched = true;
+                        }),
+              ),
+            ),
+            _gap,
+            FormSection(
+              label: 'Album',
+              child: PickerField(
+                icon: Icons.photo_album_outlined,
+                text: _album?.title,
+                placeholder: 'Add to an album',
+                onTap: _pickAlbum,
+                onClear: _album == null
+                    ? null
+                    : () => setState(() {
+                          _album = null;
+                          _albumTouched = true;
                         }),
               ),
             ),

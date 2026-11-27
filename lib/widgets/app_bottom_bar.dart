@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'package:aletheia_dev/core/theme/app_colors.dart';
 
-/// Bottom bar with two tabs (Home, Map) and a round "+" button in the middle.
+/// Bottom bar with four tabs (Home, Albums, Calendar, Map) and a round "+"
+/// button in the middle.
 class AppBottomBar extends StatelessWidget {
   const AppBottomBar({
     super.key,
@@ -36,14 +37,32 @@ class AppBottomBar extends StatelessWidget {
                   onTap: () => onSelected(0),
                 ),
               ),
+              Expanded(
+                child: _NavItem(
+                  icon: Icons.photo_album_outlined,
+                  selectedIcon: Icons.photo_album_rounded,
+                  label: 'Albums',
+                  selected: currentIndex == 1,
+                  onTap: () => onSelected(1),
+                ),
+              ),
               _AddButton(onTap: onAdd),
+              Expanded(
+                child: _NavItem(
+                  icon: Icons.calendar_month_outlined,
+                  selectedIcon: Icons.calendar_month_rounded,
+                  label: 'Calendar',
+                  selected: currentIndex == 2,
+                  onTap: () => onSelected(2),
+                ),
+              ),
               Expanded(
                 child: _NavItem(
                   icon: Icons.map_outlined,
                   selectedIcon: Icons.map_rounded,
                   label: 'Map',
-                  selected: currentIndex == 1,
-                  onTap: () => onSelected(1),
+                  selected: currentIndex == 3,
+                  onTap: () => onSelected(3),
                 ),
               ),
             ],
@@ -101,7 +120,7 @@ class _AddButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Tooltip(
         message: 'New memory',
         child: Material(
@@ -112,9 +131,9 @@ class _AddButton extends StatelessWidget {
             customBorder: const CircleBorder(),
             onTap: onTap,
             child: const SizedBox(
-              width: 54,
-              height: 54,
-              child: Icon(Icons.add, color: AppColors.onPrimary, size: 28),
+              width: 48,
+              height: 48,
+              child: Icon(Icons.add, color: AppColors.onPrimary, size: 26),
             ),
           ),
         ),

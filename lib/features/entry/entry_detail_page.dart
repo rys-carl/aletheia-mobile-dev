@@ -1,21 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:aletheia_dev/core/models/album_choice.dart';
 import 'package:aletheia_dev/core/models/entry_photo.dart';
 import 'package:aletheia_dev/core/models/place_choice.dart';
 import 'package:aletheia_dev/core/services/entry_service.dart';
 import 'package:aletheia_dev/core/theme/app_colors.dart';
 import 'package:aletheia_dev/core/theme/app_dimens.dart';
 import 'package:aletheia_dev/core/utils/date_format.dart';
+import 'package:aletheia_dev/features/albums/album_detail_page.dart';
 import 'package:aletheia_dev/features/entry/entry_form_page.dart';
+import 'package:aletheia_dev/features/upcoming/moment_ended_prompt_page.dart';
 import 'package:aletheia_dev/widgets/app_snack_bar.dart';
 import 'package:aletheia_dev/widgets/confirm_dialog.dart';
+import 'package:aletheia_dev/widgets/feeling_picker.dart';
 import 'package:aletheia_dev/widgets/network_photo.dart';
 import 'package:aletheia_dev/widgets/photo_manager_sheet.dart';
 import 'package:aletheia_dev/widgets/photo_source_sheet.dart';
 import 'package:aletheia_dev/widgets/photo_viewer.dart';
 import 'package:aletheia_dev/widgets/primary_button.dart';
 import 'package:aletheia_dev/widgets/section_card.dart';
+import 'package:aletheia_dev/widgets/skeleton.dart';
 
 /// Shows one memory: hero photo, photo strip with management & upload
 /// progress/retry, details with date & time, and soft-delete.
@@ -45,6 +50,11 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
   PlaceChoice? get _place {
     final p = _entry['places'];
     return p is Map<String, dynamic> ? PlaceChoice.fromMap(p) : null;
+  }
+
+  AlbumChoice? get _album {
+    final a = _entry['albums'];
+    return a is Map<String, dynamic> ? AlbumChoice.fromMap(a) : null;
   }
 
   EntryPhoto? get _coverPhoto {
@@ -270,18 +280,22 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
       child: ClipRRect(
         borderRadius: AppRadius.lgAll,
         child: cover == null
-            ? ColoredBox(
-                color: AppColors.primarySoft,
-                child: Center(
-                  child: _loading
-                      ? const CircularProgressIndicator()
-                      : const Icon(
-                          Icons.photo_outlined,
-                          size: 40,
-                          color: AppColors.primary,
-                        ),
-                ),
-              )
+            ? (_loading
+                ? const SkeletonBox(
+                    width: double.infinity,
+                    height: double.infinity,
+                    borderRadius: BorderRadius.zero,
+                  )
+                : const ColoredBox(
+                    color: AppColors.primarySoft,
+                    child: Center(
+                      child: Icon(
+                        Icons.photo_outlined,
+                        size: 40,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ))
             : GestureDetector(
                 onTap: () => _openViewer(coverIndex < 0 ? 0 : coverIndex),
                 child: NetworkPhoto(
@@ -299,10 +313,7 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
 
     Widget content;
     if (_loading) {
-      content = const Padding(
-        padding: EdgeInsets.all(AppSpacing.lg),
-        child: Center(child: CircularProgressIndicator()),
-      );
+      content = const SkeletonPhotoStrip();
     } else if (_error != null) {
       content = Text('Could not load photos:\n$_error');
     } else if (_photos.isEmpty) {
@@ -396,7 +407,16 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
   Widget _buildDetailsCard() {
     final textTheme = Theme.of(context).textTheme;
     final note = _entry['note'] as String?;
+    final feeling = _entry['feeling'] as String?;
+    final isUpcoming = _entry['type'] == 'upcoming';
+    final startsAt = tryParseEntryDate(_entry['happened_at']);
+    final endsAt = tryParseEntryDate(_entry['ends_at']);
+    final now = DateTime.now();
+    final hasEnded = endsAt != null && !endsAt.isAfter(now);
+    final hasStarted =
+        !hasEnded && startsAt != null && !startsAt.isAfter(now);
     final place = _place;
+    final album = _album;
 
     return SectionCard(
       child: Column(
@@ -414,13 +434,66 @@ class _EntryDetailPageState extends State<EntryDetailPage> {
             Text(note, style: textTheme.bodyMedium),
           ],
           const SizedBox(height: AppSpacing.lg),
+          if (isUpcoming) ...[
+            _InfoRow(
+              label: 'Status:',
+              value: hasEnded
+                  ? 'Ended · Ready for photos'
+                  : hasStarted
+                      ? 'Happening now'
+                      : 'Upcoming',
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           _InfoRow(
-            label: 'Date & Time:',
+            label: isUpcoming ? 'Starts:' : 'Date & Time:',
             value: displayDateTimeOf(_entry['happened_at']),
           ),
+          if (isUpcoming && _entry['ends_at'] != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _InfoRow(
+              label: 'Ends:',
+              value: displayDateTimeOf(_entry['ends_at']),
+            ),
+          ],
+          if (feeling != null && feeling.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _InfoRow(label: 'Feeling:', value: formatFeeling(feeling)),
+          ],
           if (place != null) ...[
             const SizedBox(height: AppSpacing.sm),
             _InfoRow(label: 'Location:', value: place.name),
+          ],
+          if (album != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => AlbumDetailPage(album: album),
+                ),
+              ),
+              child: _InfoRow(
+                label: 'Album:',
+                value: album.title,
+                isLink: true,
+              ),
+            ),
+          ],
+          if (isUpcoming && hasEnded) ...[
+            const SizedBox(height: AppSpacing.lg),
+            PrimaryButton(
+              label: 'Upload Photos & Complete',
+              onPressed: () async {
+                final completed = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute<bool>(
+                    builder: (_) => MomentEndedPromptPage(entry: _entry),
+                  ),
+                );
+                if (completed == true && mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
           ],
         ],
       ),
@@ -466,10 +539,15 @@ class _FailedUploadBanner extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({
+    required this.label,
+    required this.value,
+    this.isLink = false,
+  });
 
   final String label;
   final String value;
+  final bool isLink;
 
   @override
   Widget build(BuildContext context) {
@@ -487,7 +565,15 @@ class _InfoRow extends StatelessWidget {
             ),
           ),
         ),
-        Expanded(child: Text(value, style: textTheme.bodyMedium)),
+        Expanded(
+          child: Text(
+            value,
+            style: textTheme.bodyMedium?.copyWith(
+              color: isLink ? AppColors.primary : null,
+              decoration: isLink ? TextDecoration.underline : null,
+            ),
+          ),
+        ),
       ],
     );
   }
