@@ -18,6 +18,7 @@ import 'package:aletheia_dev/features/upcoming/upcoming_moment_form_page.dart';
 import 'package:aletheia_dev/widgets/app_snack_bar.dart';
 import 'package:aletheia_dev/widgets/empty_state.dart';
 import 'package:aletheia_dev/widgets/memory_card.dart';
+import 'package:aletheia_dev/widgets/memory_list_tile.dart';
 import 'package:aletheia_dev/widgets/skeleton.dart';
 
 /// Home tab: greeting, search & filters, month-grouped two-column grid of
@@ -47,6 +48,7 @@ class _HomePageState extends State<HomePage> {
   String _query = '';
   DateTimeRange? _dateRange;
   PlaceChoice? _selectedPlace;
+  bool _compactList = false;
 
   bool get _hasActiveFilters =>
       _query.trim().isNotEmpty ||
@@ -361,7 +363,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildBody() {
     if (_loading && _entries == null) {
-      return const SkeletonMemoryGrid();
+      return _compactList ? const SkeletonList() : const SkeletonMemoryGrid();
     }
     if (_error != null && _entries == null) {
       return EmptyState(
@@ -424,6 +426,21 @@ class _HomePageState extends State<HomePage> {
                       color: AppColors.textSecondary,
                     ),
                   ),
+                  const SizedBox(width: AppSpacing.xs),
+                  IconButton(
+                    tooltip:
+                        _compactList ? 'Card view' : 'Compact list view',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      _compactList
+                          ? Icons.grid_view_outlined
+                          : Icons.view_list_outlined,
+                      size: 20,
+                      color: AppColors.primary,
+                    ),
+                    onPressed: () =>
+                        setState(() => _compactList = !_compactList),
+                  ),
                 ],
               ),
             ),
@@ -446,27 +463,44 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: AppSpacing.md,
-                  crossAxisSpacing: AppSpacing.md,
-                  childAspectRatio: 0.78,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
+            if (_compactList)
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                sliver: SliverList.separated(
+                  itemCount: group.entries.length,
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(height: AppSpacing.sm),
+                  itemBuilder: (context, index) {
                     final entry = group.entries[index];
-                    return MemoryCard(
+                    return MemoryListTile(
                       entry: entry,
                       onTap: () => _openEntry(entry),
                     );
                   },
-                  childCount: group.entries.length,
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                sliver: SliverGrid(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: AppSpacing.md,
+                    crossAxisSpacing: AppSpacing.md,
+                    childAspectRatio: 0.78,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final entry = group.entries[index];
+                      return MemoryCard(
+                        entry: entry,
+                        onTap: () => _openEntry(entry),
+                      );
+                    },
+                    childCount: group.entries.length,
+                  ),
                 ),
               ),
-            ),
           ],
           if (_loadingMore)
             const SliverToBoxAdapter(

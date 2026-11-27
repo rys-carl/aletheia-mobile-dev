@@ -67,6 +67,42 @@ abstract final class EntryService {
     return _attachThumbnails(List<Map<String, dynamic>>.from(data));
   }
 
+  /// Loads active memories not currently assigned to [albumId] so they can be
+  /// added to the album from the album detail screen.
+  static Future<List<Map<String, dynamic>>> fetchAssignableToAlbum(
+    String albumId,
+  ) async {
+    final data = await supabase
+        .from('entries')
+        .select(_entrySelect)
+        .isFilter('deleted_at', null)
+        .neq('type', 'upcoming')
+        .or('album_id.is.null,album_id.neq.$albumId')
+        .order('happened_at', ascending: false)
+        .limit(100);
+
+    return _attachThumbnails(List<Map<String, dynamic>>.from(data));
+  }
+
+  /// Assigns [entryIds] to [albumId].
+  static Future<void> assignToAlbum(
+    List<String> entryIds,
+    String albumId,
+  ) async {
+    if (entryIds.isEmpty) return;
+    try {
+      await supabase
+          .from('entries')
+          .update({
+            'album_id': albumId,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .inFilter('id', entryIds);
+    } finally {
+      notifyEntriesChanged();
+    }
+  }
+
   /// Loads all active entries between [start] (inclusive) and [end]
   /// (exclusive), ordered newest first. Used by the Calendar tab.
   static Future<List<Map<String, dynamic>>> fetchDateRange(

@@ -83,8 +83,8 @@ class _MomentEndedPromptPageState extends State<MomentEndedPromptPage> {
 
     final start = tryParseEntryDate(entry['happened_at']) ?? DateTime.now();
     final end = tryParseEntryDate(entry['ends_at']) ?? DateTime.now();
-    final minTime = start.subtract(const Duration(minutes: 15));
-    final maxTime = end.add(const Duration(minutes: 15));
+    final minTime = start;
+    final maxTime = end;
 
     try {
       final ps = await PhotoManager.requestPermissionExtend();
